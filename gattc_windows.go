@@ -267,7 +267,7 @@ func (c DeviceCharacteristic) Write(p []byte) (n int, err error) {
 // "write command" (as opposed to a write request).
 func (c DeviceCharacteristic) WriteWithoutResponse(p []byte) (n int, err error) {
 	if c.properties&genericattributeprofile.GattCharacteristicPropertiesWriteWithoutResponse == 0 {
-		return 0, errNoWriteWithoutResponse
+		return c.Write(p)
 	}
 	return c.write(p, genericattributeprofile.GattWriteOptionWriteWithoutResponse)
 }
