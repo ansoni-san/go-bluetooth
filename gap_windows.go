@@ -9,6 +9,7 @@ import (
 	"github.com/saltosystems/winrt-go/windows/devices/bluetooth"
 	"github.com/saltosystems/winrt-go/windows/devices/bluetooth/advertisement"
 	"github.com/saltosystems/winrt-go/windows/devices/bluetooth/genericattributeprofile"
+	"github.com/saltosystems/winrt-go/windows/devices/enumeration"
 	"github.com/saltosystems/winrt-go/windows/foundation"
 	"github.com/saltosystems/winrt-go/windows/storage/streams"
 )
@@ -163,8 +164,112 @@ func (a *Adapter) StopScan() error {
 
 // Device is a connection to a remote peripheral.
 type Device struct {
-	device  *bluetooth.BluetoothLEDevice
-	session *genericattributeprofile.GattSession
+	device         *bluetooth.BluetoothLEDevice
+	session        *genericattributeprofile.GattSession
+	pairingHandler *foundation.TypedEventHandler
+}
+
+func createDevice(bleDevice *bluetooth.BluetoothLEDevice, session *genericattributeprofile.GattSession) *Device {
+
+	device := &Device{bleDevice, session, nil}
+	device.attemptAutoPairing()
+	return device
+}
+
+func (d *Device) attemptAutoPairing() bool {
+
+	if d.pairingHandler == nil {
+		// Check if pairing is supported by the device
+		deviceInfo, err := d.device.GetDeviceInformation()
+		if err != nil {
+			return false
+		}
+		pairingInfo, err := deviceInfo.GetPairing()
+		if err != nil {
+			return false
+		}
+		canPair, err := pairingInfo.GetCanPair()
+		if err != nil {
+			return false
+		}
+		if canPair {
+
+			// Attempt to pair with the device automatically
+			customPairing, err := pairingInfo.GetCustom()
+			if err != nil {
+				return false
+			}
+
+			// we store the handler as we need to release it when this device
+			// is no longer in use
+			d.pairingHandler, err = setupAutoAcceptPairing(customPairing)
+			if err != nil {
+				return false
+			}
+
+			// Now initiate a simple confirmation-only pairing
+			// Note: Should we attempt other types if this fails?
+			// This should be done by the OS but WinRT only does it when pairing
+			// through the windows settings app
+			pairingOp, err := customPairing.PairAsync(enumeration.DevicePairingKindsConfirmOnly)
+			if err != nil {
+				return false
+			}
+
+			// Wait for the operation to complete
+			if err := awaitAsyncOperation(pairingOp, enumeration.SignatureDevicePairingResult); err != nil {
+				return false
+			}
+
+			// Check the status to see if we succeeded
+			res, err := pairingOp.GetResults()
+			if err != nil {
+				return false
+			}
+			status, err := (*enumeration.DevicePairingResult)(res).GetStatus()
+			if err != nil {
+				return false
+			}
+			switch status {
+			case enumeration.DevicePairingResultStatusPaired:
+				return true
+			case enumeration.DevicePairingResultStatusAlreadyPaired:
+				return true
+			default:
+				return false
+			}
+		}
+	}
+
+	return false
+}
+
+func setupAutoAcceptPairing(customPairing *enumeration.DeviceInformationCustomPairing) (*foundation.TypedEventHandler, error) {
+
+	// Setup pairing request handler to autocomplete the
+	// pairing process
+
+	// TypedEventHandler<DeviceInformationCustomPairing, DevicePairingRequestedEventArgs>
+	pairingRequestedGuid := winrt.ParameterizedInstanceGUID(
+		foundation.GUIDTypedEventHandler,
+		enumeration.SignatureDeviceInformationCustomPairing,
+		enumeration.SignatureDevicePairingRequestedEventArgs,
+	)
+	pairingRequestedHandler := foundation.NewTypedEventHandler(ole.NewGUID(pairingRequestedGuid), func(instance *foundation.TypedEventHandler, sender, args unsafe.Pointer) {
+		if args != nil {
+			requestedEventArgs := (*enumeration.DevicePairingRequestedEventArgs)(args)
+			requestedEventArgs.Accept()
+		}
+	})
+
+	// Add the handler to the PairingRequested event
+	_, err := customPairing.AddPairingRequested(pairingRequestedHandler)
+	if err != nil {
+		return nil, err
+	}
+
+	// return the handler to be freed when no longer needed
+	return pairingRequestedHandler, nil
 }
 
 // Connect starts a connection attempt to the given peripheral device address.
@@ -229,7 +334,7 @@ func (a *Adapter) Connect(address Address, params ConnectionParams) (*Device, er
 		return nil, err
 	}
 
-	return &Device{bleDevice, newSession}, nil
+	return createDevice(bleDevice, newSession), nil
 }
 
 // Disconnect from the BLE device. This method is non-blocking and does not
@@ -238,6 +343,9 @@ func (d *Device) Disconnect() error {
 	defer d.device.Release()
 	defer d.session.Release()
 
+	if d.pairingHandler != nil {
+		defer d.pairingHandler.Release()
+	}
 	if err := d.session.Close(); err != nil {
 		return err
 	}

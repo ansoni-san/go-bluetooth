@@ -16,3 +16,8 @@ require (
 	tinygo.org/x/tinyfont v0.4.0 // indirect
 	tinygo.org/x/tinyterm v0.1.0
 )
+
+replace (
+	github.com/tinygo-org/cbgo v0.0.4 => ../cbgo
+    github.com/saltosystems/winrt-go => ../winrt-go
+)
