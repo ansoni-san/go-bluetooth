@@ -15,3 +15,7 @@ require (
 	tinygo.org/x/drivers v0.23.0
 	tinygo.org/x/tinyterm v0.1.0
 )
+
+replace (
+	github.com/tinygo-org/cbgo v0.0.4 => ../cbgo
+)
