@@ -368,4 +368,8 @@ type ConnectionParams struct {
 	// will be used.
 	MinInterval Duration
 	MaxInterval Duration
+
+	// Whether to attempt automatic pairing on platforms that do not
+	// automatically perform it for us
+	AttemptPairing bool
 }

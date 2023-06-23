@@ -169,10 +169,15 @@ type Device struct {
 	pairingHandler *foundation.TypedEventHandler
 }
 
-func createDevice(bleDevice *bluetooth.BluetoothLEDevice, session *genericattributeprofile.GattSession) *Device {
+func createDevice(bleDevice *bluetooth.BluetoothLEDevice, session *genericattributeprofile.GattSession, params ConnectionParams) *Device {
 
 	device := &Device{bleDevice, session, nil}
-	device.attemptAutoPairing()
+
+	// Automatically pair to the device if it supports pairing
+	// and the pairing connection parameter has been set
+	if params.AttemptPairing {
+		device.attemptAutoPairing()
+	}
 	return device
 }
 
@@ -334,7 +339,7 @@ func (a *Adapter) Connect(address Address, params ConnectionParams) (*Device, er
 		return nil, err
 	}
 
-	return createDevice(bleDevice, newSession), nil
+	return createDevice(bleDevice, newSession, params), nil
 }
 
 // Disconnect from the BLE device. This method is non-blocking and does not
